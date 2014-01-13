@@ -8,9 +8,10 @@ import (
 	"github.com/gonum/blas/cblas"
 	"github.com/gonum/floats"
 
-	check "launchpad.net/gocheck"
+	"fmt"
 	"math/rand"
 	"testing"
+	check "launchpad.net/gocheck"
 )
 
 // Tests
@@ -20,12 +21,22 @@ type S struct{}
 
 var _ = check.Suite(&S{})
 
-func panics(fn Panicker) (panicked bool) {
+func leaksPanic(fn Panicker) (panicked bool) {
 	defer func() {
 		r := recover()
 		panicked = r != nil
 	}()
 	Maybe(fn)
+	return
+}
+
+func panics(fn func()) (panicked bool, message string) {
+	defer func() {
+		r := recover()
+		panicked = r != nil
+		message = fmt.Sprint(r)
+	}()
+	fn()
 	return
 }
 
@@ -46,19 +57,12 @@ func unflatten(r, c int, d []float64) [][]float64 {
 	return m
 }
 
-func mustDense(m *Dense, err error) *Dense {
-	if err != nil {
-		panic(err)
-	}
-	return m
-}
-
 func eye() *Dense {
-	return mustDense(NewDense(3, 3, []float64{
+	return NewDense(3, 3, []float64{
 		1, 0, 0,
 		0, 1, 0,
 		0, 0, 1,
-	}))
+	})
 }
 
 func (s *S) TestMaybe(c *check.C) {
@@ -79,7 +83,7 @@ func (s *S) TestMaybe(c *check.C) {
 			false,
 		},
 	} {
-		c.Check(panics(test.fn), check.Equals, test.panics, check.Commentf("Test %d", i))
+		c.Check(leaksPanic(test.fn), check.Equals, test.panics, check.Commentf("Test %d", i))
 	}
 }
 
@@ -100,7 +104,7 @@ func (s *S) TestNewDense(c *check.C) {
 			3, 3,
 			0, 0,
 			0,
-			&Dense{BlasMatrix{
+			&Dense{RawMatrix{
 				Order: BlasOrder,
 				Rows:  3, Cols: 3,
 				Stride: 3,
@@ -116,7 +120,7 @@ func (s *S) TestNewDense(c *check.C) {
 			3, 3,
 			1, 1,
 			3,
-			&Dense{BlasMatrix{
+			&Dense{RawMatrix{
 				Order: BlasOrder,
 				Rows:  3, Cols: 3,
 				Stride: 3,
@@ -132,7 +136,7 @@ func (s *S) TestNewDense(c *check.C) {
 			3, 3,
 			0, 1,
 			1.7320508075688772,
-			&Dense{BlasMatrix{
+			&Dense{RawMatrix{
 				Order: BlasOrder,
 				Rows:  3, Cols: 3,
 				Stride: 3,
@@ -148,7 +152,7 @@ func (s *S) TestNewDense(c *check.C) {
 			3, 3,
 			-1, 0,
 			1.7320508075688772,
-			&Dense{BlasMatrix{Order: BlasOrder,
+			&Dense{RawMatrix{Order: BlasOrder,
 				Rows: 3, Cols: 3,
 				Stride: 3,
 				Data:   []float64{-1, 0, 0, 0, -1, 0, 0, 0, -1},
@@ -162,7 +166,7 @@ func (s *S) TestNewDense(c *check.C) {
 			2, 3,
 			1, 6,
 			9.539392014169456,
-			&Dense{BlasMatrix{Order: BlasOrder,
+			&Dense{RawMatrix{Order: BlasOrder,
 				Rows: 2, Cols: 3,
 				Stride: 3,
 				Data:   []float64{1, 2, 3, 4, 5, 6},
@@ -177,7 +181,7 @@ func (s *S) TestNewDense(c *check.C) {
 			3, 2,
 			1, 6,
 			9.539392014169456,
-			&Dense{BlasMatrix{
+			&Dense{RawMatrix{
 				Order: BlasOrder,
 				Rows:  3, Cols: 2,
 				Stride: 2,
@@ -185,8 +189,7 @@ func (s *S) TestNewDense(c *check.C) {
 			}},
 		},
 	} {
-		m, err := NewDense(test.rows, test.cols, test.a)
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
+		m := NewDense(test.rows, test.cols, test.a)
 		rows, cols := m.Dims()
 		c.Check(rows, check.Equals, test.rows, check.Commentf("Test %d", i))
 		c.Check(cols, check.Equals, test.cols, check.Commentf("Test %d", i))
@@ -204,8 +207,7 @@ func (s *S) TestRowCol(c *check.C) {
 		{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 12}},
 		{{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}},
 	} {
-		a, err := NewDense(flatten(af))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
+		a := NewDense(flatten(af))
 		for ri, row := range af {
 			c.Check(a.Row(nil, ri), check.DeepEquals, row, check.Commentf("Test %d", i))
 		}
@@ -220,14 +222,13 @@ func (s *S) TestRowCol(c *check.C) {
 }
 
 func (s *S) TestSetRowColumn(c *check.C) {
-	for i, as := range [][][]float64{
+	for _, as := range [][][]float64{
 		{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}},
 		{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 12}},
 		{{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}},
 	} {
 		for ri, row := range as {
-			a, err := NewDense(flatten(as))
-			c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
+			a := NewDense(flatten(as))
 			t := &Dense{}
 			t.Clone(a)
 			a.SetRow(ri, make([]float64, a.mat.Cols))
@@ -236,8 +237,7 @@ func (s *S) TestSetRowColumn(c *check.C) {
 		}
 
 		for ci := range as[0] {
-			a, err := NewDense(flatten(as))
-			c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
+			a := NewDense(flatten(as))
 			t := &Dense{}
 			t.Clone(a)
 			a.SetCol(ci, make([]float64, a.mat.Rows))
@@ -281,12 +281,9 @@ func (s *S) TestAdd(c *check.C) {
 			[][]float64{{2, 4, 6}, {8, 10, 12}},
 		},
 	} {
-		a, err := NewDense(flatten(test.a))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
-		b, err := NewDense(flatten(test.b))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
-		r, err := NewDense(flatten(test.r))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
+		a := NewDense(flatten(test.a))
+		b := NewDense(flatten(test.b))
+		r := NewDense(flatten(test.r))
 
 		temp := &Dense{}
 		temp.Add(a, b)
@@ -338,12 +335,9 @@ func (s *S) TestSub(c *check.C) {
 			[][]float64{{0, 0, 0}, {0, 0, 0}},
 		},
 	} {
-		a, err := NewDense(flatten(test.a))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
-		b, err := NewDense(flatten(test.b))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
-		r, err := NewDense(flatten(test.r))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
+		a := NewDense(flatten(test.a))
+		b := NewDense(flatten(test.b))
+		r := NewDense(flatten(test.r))
 
 		temp := &Dense{}
 		temp.Sub(a, b)
@@ -395,12 +389,9 @@ func (s *S) TestMulElem(c *check.C) {
 			[][]float64{{1, 4, 9}, {16, 25, 36}},
 		},
 	} {
-		a, err := NewDense(flatten(test.a))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
-		b, err := NewDense(flatten(test.b))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
-		r, err := NewDense(flatten(test.r))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
+		a := NewDense(flatten(test.a))
+		b := NewDense(flatten(test.b))
+		r := NewDense(flatten(test.r))
 
 		temp := &Dense{}
 		temp.MulElem(a, b)
@@ -457,12 +448,9 @@ func (s *S) TestMul(c *check.C) {
 			[][]float64{{0, 2, 2}, {0, 2, 2}, {0, 2, 2}},
 		},
 	} {
-		a, err := NewDense(flatten(test.a))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
-		b, err := NewDense(flatten(test.b))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
-		r, err := NewDense(flatten(test.r))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
+		a := NewDense(flatten(test.a))
+		b := NewDense(flatten(test.b))
+		r := NewDense(flatten(test.r))
 
 		temp := &Dense{}
 		temp.Mul(a, b)
@@ -484,7 +472,7 @@ func randDense(size int, rho float64, rnd func() float64) (*Dense, error) {
 	if size == 0 {
 		return nil, ErrZeroLength
 	}
-	d := &Dense{BlasMatrix{
+	d := &Dense{RawMatrix{
 		Order: BlasOrder,
 		Rows:  size, Cols: size, Stride: size,
 		Data: make([]float64, size*size),
@@ -587,10 +575,8 @@ func (s *S) TestTranspose(c *check.C) {
 			[][]float64{{1, 4}, {2, 5}, {3, 6}},
 		},
 	} {
-		a, err := NewDense(flatten(test.a))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
-		t, err := NewDense(flatten(test.t))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
+		a := NewDense(flatten(test.a))
+		t := NewDense(flatten(test.t))
 
 		var r, rr Dense
 
@@ -652,8 +638,7 @@ func (s *S) TestNorm(c *check.C) {
 			norm: 6,
 		},
 	} {
-		a, err := NewDense(flatten(test.a))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
+		a := NewDense(flatten(test.a))
 		c.Check(a.Norm(test.ord), check.Equals, test.norm, check.Commentf("Test %d: %v norm = %f", i, test.a, test.norm))
 	}
 }
@@ -716,10 +701,8 @@ func (s *S) TestApply(c *check.C) {
 			},
 		},
 	} {
-		a, err := NewDense(flatten(test.a))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
-		t, err := NewDense(flatten(test.t))
-		c.Assert(err, check.Equals, nil, check.Commentf("Test %d", i))
+		a := NewDense(flatten(test.a))
+		t := NewDense(flatten(test.t))
 
 		var r Dense
 
@@ -728,6 +711,162 @@ func (s *S) TestApply(c *check.C) {
 
 		a.Apply(test.fn, a)
 		c.Check(a.Equals(t), check.Equals, true, check.Commentf("Test %d: obtained %v expect: %v", i, a.mat.Data, t.mat.Data))
+	}
+}
+
+func (s *S) TestSolve(c *check.C) {
+	for _, test := range []struct {
+		name   string
+		panics bool
+		a      [][]float64
+		b      [][]float64
+		x      [][]float64
+	}{
+		{
+			name:   "OneElement",
+			panics: false,
+			a:      [][]float64{{6}},
+			b:      [][]float64{{3}},
+			x:      [][]float64{{0.5}},
+		},
+		{
+			name:   "SquareIdentity",
+			panics: false,
+			a: [][]float64{
+				{1, 0, 0},
+				{0, 1, 0},
+				{0, 0, 1},
+			},
+			b: [][]float64{
+				{3},
+				{2},
+				{1},
+			},
+			x: [][]float64{
+				{3},
+				{2},
+				{1},
+			},
+		},
+		{
+			name:   "Square",
+			panics: false,
+			a: [][]float64{
+				{0.8147, 0.9134, 0.5528},
+				{0.9058, 0.6324, 0.8723},
+				{0.1270, 0.0975, 0.7612},
+			},
+			b: [][]float64{
+				{0.278},
+				{0.547},
+				{0.958},
+			},
+			x: [][]float64{
+				{-0.932687281002860},
+				{0.303963920182067},
+				{1.375216503507109},
+			},
+		},
+		{
+			name:   "ColumnMismatch",
+			panics: true,
+			a: [][]float64{
+				{0.6046602879796196, 0.9405090880450124, 0.6645600532184904},
+				{0.4377141871869802, 0.4246374970712657, 0.6868230728671094},
+			},
+			b: [][]float64{
+				{0.30091186058528707},
+				{0.5152126285020654},
+				{0.8136399609900968},
+				{0.12345},
+			},
+			x: [][]float64{
+				{-26.618512183136257},
+				{8.730387239011677},
+				{12.316510032082446},
+				{0.1234},
+			},
+		},
+		{
+			name:   "WideMatrix",
+			panics: true,
+			a: [][]float64{
+				{0.8147, 0.9134, 0.5528},
+				{0.9058, 0.6324, 0.8723},
+			},
+			b: [][]float64{
+				{0.278},
+				{0.547},
+			},
+			x: [][]float64{
+				{1.037422650449745},
+				{-0.620963688768783},
+			},
+		},
+
+		{
+			name:   "Skinny1",
+			panics: false,
+			a: [][]float64{
+				{0.8147, 0.9134, 0.9},
+				{0.9058, 0.6324, 0.9},
+				{0.1270, 0.0975, 0.1},
+				{1.6, 2.8, -3.5},
+			},
+			b: [][]float64{
+				{0.278},
+				{0.547},
+				{-0.958},
+				{1.452},
+			},
+			x: [][]float64{
+				{0.820970340787782},
+				{-0.218604626527306},
+				{-0.212938815234215},
+			},
+		},
+		{
+			name:   "Skinny2",
+			panics: false,
+			a: [][]float64{
+				{0.8147, 0.9134, 0.231, -1.65},
+				{0.9058, 0.6324, 0.9, 0.72},
+				{0.1270, 0.0975, 0.1, 1.723},
+				{1.6, 2.8, -3.5, 0.987},
+				{7.231, 9.154, 1.823, 0.9},
+			},
+			b: [][]float64{
+				{0.278, 8.635},
+				{0.547, 9.125},
+				{-0.958, -0.762},
+				{1.452, 1.444},
+				{1.999, -7.234},
+			},
+			x: [][]float64{
+				{1.863006789511373, 44.467887791812750},
+				{-1.127270935407224, -34.073794226035126},
+				{-0.527926457947330, -8.032133759788573},
+				{-0.248621916204897, -2.366366415805275},
+			},
+		},
+	} {
+		a := NewDense(flatten(test.a))
+		b := NewDense(flatten(test.b))
+
+		var x *Dense
+
+		fn := func() {
+			x = Solve(a, b)
+		}
+
+		panicked, message := panics(fn)
+		if panicked {
+			c.Check(panicked, check.Equals, test.panics, check.Commentf("Test %v panicked: %s", test.name, message))
+			continue
+		}
+
+		trueX := NewDense(flatten(test.x))
+		c.Check(x.EqualsApprox(trueX, 1e-13), check.Equals, true, check.Commentf("Test %v solution mismatch: Found %v, expected %v ", test.name, x, trueX))
 	}
 }
 

@@ -173,7 +173,7 @@ func (f LUFactors) IsSingular() bool {
 func (f LUFactors) L() *Dense {
 	lu := f.LU
 	m, n := lu.Dims()
-	l, _ := NewDense(m, n, make([]float64, m*n))
+	l := NewDense(m, n, nil)
 	for i := 0; i < m; i++ {
 		for j := 0; j < n; j++ {
 			if i > j {
@@ -190,7 +190,7 @@ func (f LUFactors) L() *Dense {
 func (f LUFactors) U() *Dense {
 	lu := f.LU
 	m, n := lu.Dims()
-	u, _ := NewDense(m, n, make([]float64, m*n))
+	u := NewDense(m, n, nil)
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
 			if i <= j {
@@ -222,7 +222,7 @@ func (f LUFactors) Det() float64 {
 func (f LUFactors) Solve(b *Dense) (x *Dense) {
 	lu, piv := f.LU, f.Pivot
 	m, n := lu.Dims()
-	bm, _ := b.Dims()
+	bm, bn := b.Dims()
 	if bm != m {
 		panic(ErrShape)
 	}
@@ -231,7 +231,7 @@ func (f LUFactors) Solve(b *Dense) (x *Dense) {
 	}
 
 	// Copy right hand side with pivoting
-	nx := bm
+	nx := bn
 	x = pivotRows(b, piv)
 
 	// Solve L*Y = B(piv,:)
